@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Document</title>
+  <style>
+    body {
+      height: 100vh;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .button-group {
+      display: flex;
+      gap: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="button-group">
+    <button onclick="startRecording()">녹음 시작</button>
+    <button onclick="stopRecording()">녹음 중지</button>
+  </div>
+
+  <script>
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let stream = null;
+
+    async function startRecording() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        mediaRecorder.start();
+        console.log("녹음 시작됨");
+
+        mediaRecorder.ondataavailable = event => {
+          audioChunks.push(event.data);
+        };
+      } catch (error) {
+        console.error("녹음 시작 오류:", error);
+      }
+    }
+
+    function stopRecording() {
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        console.log("audioBlob 생성됨:", audioBlob);
+
+        if (!audioBlob || audioBlob.size === 0) {
+          console.error("audioBlob이 비어있거나 생성 실패");
+          return;
+        }
+
+        await sendAudio(audioBlob);  
+        
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+          stream = null;
+        }
+        mediaRecorder = null;
+      };
+
+      mediaRecorder.stop();
+      console.log("녹음 중지됨");
+    }
+
+    async function sendAudio(audioBlob) {
+      if (!audioBlob) {
+        console.error("audioBlob이 null 또는 undefined입니다.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "recorded.webm");
+      console.log("[1] 업로드 요청 시작");
+
+      try {
+        const uploadResponse = await fetch('http://127.0.0.1:8000/upload', {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+
+        console.log("[2] 업로드 응답 상태:", uploadResponse.status);
+
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text();
+          console.error("업로드 실패:", errorText);
+          return;
+        }
+
+        console.log("[3] 다운로드 요청 시작");
+        const downloadResponse = await fetch('http://127.0.0.1:8000/download');
+
+        if (!downloadResponse.ok) {
+          const downloadText = await downloadResponse.text();
+          console.error("다운로드 실패:", downloadText);
+          return;
+        }
+
+        const blob = await downloadResponse.blob();
+        console.log("[4] 다운로드 완료. 파일 크기:", blob.size);
+
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "processed.wav";
+        a.click();
+        console.log("[5] 다운로드 링크 클릭 완료");
+
+      } catch (err) {
+        console.error("네트워크 요청 중 오류 발생:", err);
+      }
+    }
+  </script>
+</body>
+</html>
+
+<!-- python -m http.server 8001 --> 
